@@ -124,6 +124,11 @@ Open a new terminal and navigate to the frontend directory:
 cd frontend
 ```
 
+Create a `.env` file with the backend API URL:
+```bash
+echo "VITE_API_URL=http://localhost:8000" > .env
+```
+
 Install dependencies:
 ```bash
 npm install
