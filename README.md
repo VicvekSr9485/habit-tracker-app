@@ -4,8 +4,8 @@ A comprehensive, full-stack habit tracking application built with FastAPI and Re
 
 ## Technical Documentation
 
-- Backend: [backend/TECHNICAL_DOCUMENTATION](backend/TECHNICAL_DOCUMENTATION)
-- Frontend: [frontend/TECHNICAL_DOCUMENTATION](frontend/TECHNICAL_DOCUMENTATION)
+- Backend: [backend/TECHNICAL_DOCUMENTATION](backend/TECHNICAL_DOCUMENTATION.md)
+- Frontend: [frontend/TECHNICAL_DOCUMENTATION](frontend/TECHNICAL_DOCUMENTATION.md)
 
 ## 🚀 Features
 
