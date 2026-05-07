@@ -1,4 +1,11 @@
-"""Sample data generator for testing and demonstration."""
+"""Sample data generator used to seed an empty database.
+
+The :func:`generate_sample_habits` function returns five predefined
+habits with 28 days of completion history. Daily habits each have a
+target completion rate (90% / 70% / 60%-rising) so the analytics
+dashboard has interesting data on first launch; weekly habits follow
+fixed schedules with one deliberate gap.
+"""
 
 from datetime import datetime, timedelta
 from typing import List
@@ -9,11 +16,16 @@ from storage.interface import StorageInterface
 
 
 def generate_sample_habits() -> List[Habit]:
-    """
-    Generate 5 predefined habits with 4 weeks of sample data.
-    
+    """Build five demo habits with 28 days of synthetic history.
+
+    The list is deterministic in *which* habits are created but each
+    daily completion is sampled probabilistically with :mod:`random`,
+    so individual completion timestamps differ between calls.
+
     Returns:
-        List of Habit objects with completion history
+        A list of in-memory :class:`Habit` objects with completion
+        history attached. The caller is responsible for persisting
+        them via :func:`load_sample_data`.
     """
     base_date = datetime.now() - timedelta(days=28)
     
@@ -114,11 +126,14 @@ def generate_sample_habits() -> List[Habit]:
 
 
 def load_sample_data(storage: StorageInterface) -> None:
-    """
-    Load sample habits into storage.
-    
+    """Persist :func:`generate_sample_habits` output into ``storage``.
+
+    Each habit is inserted via :meth:`StorageInterface.save_habit` and
+    its assigned ID is printed so operators can see the seeded rows in
+    server logs.
+
     Args:
-        storage: Storage implementation to save habits to
+        storage: Storage backend to write into.
     """
     habits = generate_sample_habits()
     

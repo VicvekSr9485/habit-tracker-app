@@ -1,17 +1,44 @@
-"""Core Habit domain model."""
+"""Core habit domain model and streak arithmetic.
+
+This module deliberately contains no I/O. The :class:`Habit` class is a
+plain Python object that the persistence layer hydrates, the analytics
+layer reads, and the API layer wraps in Pydantic schemas. All time
+arithmetic — period bucketing, streak counting, broken-state detection —
+lives here so it is unit-testable without a database or HTTP client.
+
+Two periodicities are supported:
+
+``daily``
+    A period is a single calendar day in local time, keyed by
+    ``YYYY-MM-DD``.
+
+``weekly``
+    A period is an ISO week (Monday-start), keyed by ``YYYY-Www``.
+    Sunday and the following Monday are therefore in *different*
+    periods even though only one day apart.
+"""
 
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 
 
 class Habit:
+    """A user-defined habit with its completion history.
+
+    Instances are mutable; ``complete_task`` mutates the in-memory
+    ``completions`` list and the storage layer persists those changes
+    separately. Two completions that fall in the same period are
+    deduplicated so the streak math doesn't double-count.
+
+    Attributes:
+        id: Database primary key, ``None`` for unsaved instances.
+        name: Display name.
+        description: Free-form description.
+        periodicity: Either ``"daily"`` or ``"weekly"``.
+        created_at: Instant the habit was first defined.
+        completions: Chronologically-sorted list of completion times.
     """
-    Represents a habit that a user wants to track.
-    
-    A habit has a name, description, periodicity (daily or weekly),
-    and tracks completion dates to calculate streaks.
-    """
-    
+
     VALID_PERIODICITIES = ["daily", "weekly"]
     
     def __init__(
@@ -51,47 +78,61 @@ class Habit:
         self.completions: List[datetime] = completions or []
     
     def complete_task(self, completion_date: datetime | None = None) -> bool:
-        """
-        Mark the habit as completed for a given date.
-        
+        """Record a completion, deduplicating within a period.
+
+        Multiple calls within the same period (same calendar day for
+        daily habits, same ISO week for weekly habits) are silently
+        deduplicated and only the first is persisted in
+        :attr:`completions`.
+
         Args:
-            completion_date: The date/time of completion (defaults to now)
-        
+            completion_date: Instant of completion. Defaults to
+                :func:`datetime.now`.
+
         Returns:
-            True if the completion was recorded successfully
+            ``True`` when a new completion was recorded, ``False`` if
+            the habit was already complete for this period.
         """
         if completion_date is None:
             completion_date = datetime.now()
-        
-        # Avoid duplicate completions for the same period
+
         if not self._is_already_completed_for_period(completion_date):
             self.completions.append(completion_date)
             self.completions.sort()
             return True
         return False
-    
+
     def _is_already_completed_for_period(self, date: datetime) -> bool:
-        """Check if habit is already completed for the given period."""
+        """Return ``True`` if ``date`` falls in an already-completed period."""
         period_key = self._get_period_key(date)
         return any(
             self._get_period_key(comp) == period_key
             for comp in self.completions
         )
-    
+
     def _get_period_key(self, date: datetime) -> str:
-        """Get a unique key for the period containing the given date."""
+        """Map ``date`` to the canonical key for its enclosing period.
+
+        Daily habits use ``YYYY-MM-DD``; weekly habits use the ISO week
+        number ``YYYY-Www``.
+        """
         if self.periodicity == "daily":
             return date.strftime("%Y-%m-%d")
         else:  # weekly
-            # ISO week format: year-week_number
             return f"{date.year}-W{date.isocalendar()[1]:02d}"
-    
+
     def get_current_streak(self) -> int:
-        """
-        Calculate the current streak of consecutive completions.
-        
+        """Count consecutive completed periods ending at "now".
+
+        The streak is anchored to the *current* period: if the habit
+        was not completed today (or this week) but was completed
+        yesterday (or last week), the streak still counts — completing
+        today simply extends it. A gap of one full empty period breaks
+        the streak.
+
         Returns:
-            The number of consecutive periods with completions up to now
+            The number of consecutive completed periods up to now,
+            or ``0`` if there are no recent completions.
         """
         if not self.completions:
             return 0
@@ -127,11 +168,17 @@ class Habit:
         return streak
     
     def get_longest_streak(self) -> int:
-        """
-        Calculate the longest streak ever achieved for this habit.
-        
+        """Return the longest historical run of consecutive periods.
+
+        Walks every recorded completion in chronological order and
+        tracks the longest run of adjacent periods. Unlike
+        :meth:`get_current_streak`, this is a permanent achievement —
+        it can be larger than the current streak when there has been a
+        gap.
+
         Returns:
-            The maximum number of consecutive periods with completions
+            The maximum number of consecutive completed periods, or
+            ``0`` if the habit has never been completed.
         """
         if not self.completions:
             return 0
@@ -155,14 +202,19 @@ class Habit:
         return max_streak
     
     def is_broken(self, check_date: datetime | None = None) -> bool:
-        """
-        Check if the habit is currently broken (missed the required period).
-        
+        """Return ``True`` when the habit has missed a full period.
+
+        For a habit with no completions, "broken" means we are past
+        the first full period after :attr:`created_at`. For a habit
+        with completions, it means we are past the period immediately
+        following the most recent completion.
+
         Args:
-            check_date: The date to check against (defaults to now)
-        
+            check_date: Reference instant; defaults to
+                :func:`datetime.now`.
+
         Returns:
-            True if the habit has been broken
+            ``True`` if the habit is currently considered broken.
         """
         if check_date is None:
             check_date = datetime.now()
@@ -178,25 +230,35 @@ class Habit:
         return check_date > next_required_period
     
     def _get_previous_period_date(self, date: datetime) -> datetime:
-        """Get the start date of the previous period."""
+        """Step ``date`` back by one period (one day or one week)."""
         if self.periodicity == "daily":
             return date - timedelta(days=1)
-        else:  # weekly
+        else:
             return date - timedelta(weeks=1)
-    
+
     def _get_next_period_date(self, date: datetime) -> datetime:
-        """Get the start date of the next period."""
+        """Step ``date`` forward by one period (one day or one week)."""
         if self.periodicity == "daily":
             return date + timedelta(days=1)
-        else:  # weekly
+        else:
             return date + timedelta(weeks=1)
-    
+
     def get_completion_dates(self) -> List[datetime]:
-        """Get all completion dates for this habit."""
+        """Return a sorted copy of every completion timestamp.
+
+        The returned list is a copy, so callers may mutate it freely
+        without affecting the habit's internal state.
+        """
         return sorted(self.completions.copy())
-    
+
     def to_dict(self) -> Dict[str, Any]:
-        """Convert the habit to a dictionary representation."""
+        """Serialise the habit to a JSON-friendly dict.
+
+        Datetimes are rendered as ISO-8601 strings and the dict
+        includes computed fields (``current_streak``,
+        ``longest_streak``) so callers can render summaries without
+        re-instantiating the class.
+        """
         return {
             "id": self.id,
             "name": self.name,
@@ -210,7 +272,18 @@ class Habit:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Habit":
-        """Create a Habit instance from a dictionary."""
+        """Reconstruct a :class:`Habit` from a :meth:`to_dict` payload.
+
+        Datetime fields may be either ISO-8601 strings or already-parsed
+        :class:`datetime` instances; both are accepted so the method
+        round-trips with both JSON payloads and live objects.
+
+        Args:
+            data: Dict matching the schema produced by :meth:`to_dict`.
+
+        Returns:
+            A new :class:`Habit` instance with completions populated.
+        """
         return cls(
             name=data["name"],
             description=data["description"],

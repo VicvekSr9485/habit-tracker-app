@@ -1,4 +1,12 @@
-"""CLI controller using Click."""
+"""Command-line interface for the habit tracker.
+
+Built on `Click <https://click.palletsprojects.com/>`_. The module
+instantiates a single :class:`SQLiteStorage` against ``habits.db`` in
+the working directory and a matching :class:`HabitManager`; tests
+replace these with in-memory equivalents using ``monkeypatch``.
+
+Run ``python -m cli.controller --help`` to see every command.
+"""
 
 import click
 from datetime import datetime
@@ -17,7 +25,11 @@ manager = HabitManager(storage)
 
 @click.group()
 def cli():
-    """Habit Tracker - Track your habits and build streaks!"""
+    """Habit Tracker — track your habits and build streaks.
+
+    Top-level command group. Run any subcommand with ``--help`` for
+    its individual options.
+    """
     pass
 
 
@@ -31,7 +43,10 @@ def cli():
     help="How often to track (daily or weekly)"
 )
 def create(name: str, description: str, periodicity: str):
-    """Create a new habit."""
+    """Create a new habit and print its assigned ID.
+
+    All three options are prompted interactively when omitted.
+    """
     try:
         habit = manager.create_habit(name, description, periodicity)
         click.echo(click.style(f"\n✓ Habit created successfully!", fg="green"))
@@ -45,7 +60,7 @@ def create(name: str, description: str, periodicity: str):
 @cli.command()
 @click.option("--periodicity", type=click.Choice(["daily", "weekly"]), help="Filter by periodicity")
 def list(periodicity: Optional[str]):
-    """List all habits."""
+    """Print habits as a table, optionally filtered by periodicity."""
     if periodicity:
         habits = manager.get_habits_by_periodicity(periodicity)
         title = f"{periodicity.capitalize()} Habits"
@@ -85,7 +100,11 @@ def list(periodicity: Optional[str]):
 @cli.command()
 @click.argument("habit_id", type=int)
 def complete(habit_id: int):
-    """Mark a habit as completed."""
+    """Mark a habit complete for the current period.
+
+    Prints a warning when the habit was already completed for this
+    period (the manager's idempotent dedupe).
+    """
     habit = manager.get_habit(habit_id)
     
     if not habit:
@@ -110,7 +129,7 @@ def complete(habit_id: int):
 @cli.command()
 @click.argument("habit_id", type=int)
 def delete(habit_id: int):
-    """Delete a habit."""
+    """Delete a habit after an interactive confirmation prompt."""
     habit = manager.get_habit(habit_id)
     
     if not habit:
@@ -130,7 +149,7 @@ def delete(habit_id: int):
 @cli.command()
 @click.argument("habit_id", type=int)
 def info(habit_id: int):
-    """Show detailed information about a habit."""
+    """Show full details for one habit, including recent completions."""
     habit = manager.get_habit(habit_id)
     
     if not habit:
@@ -158,7 +177,7 @@ def info(habit_id: int):
 
 @cli.command()
 def analyze():
-    """Show analytics for all habits."""
+    """Print a one-screen analytics summary for every tracked habit."""
     habits = manager.get_all_habits()
     
     if not habits:
@@ -195,7 +214,7 @@ def analyze():
 
 @cli.command()
 def longest():
-    """Show the habit with the longest streak."""
+    """Print the habit holding the all-time longest streak."""
     habits = manager.get_all_habits()
     
     if not habits:

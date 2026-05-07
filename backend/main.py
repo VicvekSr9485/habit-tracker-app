@@ -1,4 +1,10 @@
-"""FastAPI application entry point."""
+"""FastAPI application entry point.
+
+Run directly with ``python main.py`` to start a Uvicorn server, or via
+``uvicorn main:app --reload`` for hot-reload during development. The
+``lifespan`` handler bootstraps a demo database on first launch so the
+frontend has data to render against.
+"""
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,19 +17,22 @@ from api.dependencies import get_storage
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Handle startup and shutdown events."""
-    # Startup: Load sample data if database is empty
+    """Manage app-wide startup and shutdown.
+
+    On startup, seed the database with sample habits if it is empty.
+    On shutdown, close the singleton SQLite connection so the file
+    handle is released cleanly.
+    """
     storage = get_storage()
     habits = storage.load_all_habits()
-    
+
     if len(habits) == 0:
         print("Loading sample data...")
         load_sample_data(storage)
         print("Sample data loaded successfully!")
-    
+
     yield
-    
-    # Shutdown: Close storage connection
+
     storage.close()
 
 
@@ -54,7 +63,7 @@ app.include_router(router)
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
+    """Return a small index payload pointing at the OpenAPI docs."""
     return {
         "message": "Welcome to Habit Tracker API",
         "version": "1.0.0",
@@ -65,7 +74,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Liveness probe — always returns ``{"status": "healthy"}``."""
     return {"status": "healthy"}
 
 

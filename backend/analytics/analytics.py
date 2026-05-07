@@ -1,4 +1,13 @@
-"""Functional analytics module for habit data analysis."""
+"""Functional analytics module for habit data analysis.
+
+Each function in this module is a pure, side-effect-free transformation
+over a list of :class:`Habit` objects. They are deliberately written
+with ``map``/``filter``/``reduce`` to illustrate a functional style
+appropriate for the IU "Object-Oriented and Functional Programming with
+Python" assignment, and to make composition with the FastAPI layer
+trivial: the API simply hands the in-memory list of habits to a
+function and serialises the return value.
+"""
 
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Tuple, Optional
@@ -8,14 +17,15 @@ from models.habit import Habit
 
 
 def get_all_habits(habits: List[Habit]) -> List[Dict[str, Any]]:
-    """
-    Get a list of all currently tracked habits.
-    
+    """Project habits to a lightweight summary form.
+
     Args:
-        habits: List of Habit objects
-    
+        habits: Habits to summarise.
+
     Returns:
-        List of habit dictionaries with basic information
+        One dict per habit containing ``id``, ``name``, ``periodicity``,
+        ``current_streak`` and an ISO-8601 ``created_at``. The list
+        preserves the order of ``habits``.
     """
     return list(map(lambda h: {
         "id": h.id,
@@ -30,29 +40,27 @@ def get_habits_by_periodicity(
     habits: List[Habit],
     periodicity: str
 ) -> List[Habit]:
-    """
-    Filter habits by their periodicity.
-    
+    """Return only the habits whose periodicity matches.
+
     Args:
-        habits: List of Habit objects
-        periodicity: The periodicity to filter by ('daily' or 'weekly')
-    
+        habits: Habits to filter.
+        periodicity: ``"daily"`` or ``"weekly"``.
+
     Returns:
-        List of habits matching the specified periodicity
+        A new list containing the matching habits, preserving order.
     """
     return list(filter(lambda h: h.periodicity == periodicity, habits))
 
 
 def get_longest_streak_all(habits: List[Habit]) -> Tuple[Optional[str], int]:
-    """
-    Find the longest streak across all habits.
-    
+    """Find the longest streak achieved across every habit.
+
     Args:
-        habits: List of Habit objects
-    
+        habits: Habits to inspect.
+
     Returns:
-        Tuple of (habit_name, longest_streak_count)
-        Returns (None, 0) if no habits exist
+        A tuple ``(habit_name, streak_length)``. When the list is empty
+        — or every habit has a zero streak — returns ``(None, 0)``.
     """
     if not habits:
         return (None, 0)
@@ -74,14 +82,17 @@ def get_longest_streak_all(habits: List[Habit]) -> Tuple[Optional[str], int]:
 
 
 def get_longest_streak_for_habit(habit: Habit) -> int:
-    """
-    Get the longest streak for a specific habit.
-    
+    """Return the longest historical streak for a single habit.
+
+    A thin wrapper over :meth:`Habit.get_longest_streak` retained for
+    symmetry with the other module-level analytics functions.
+
     Args:
-        habit: The Habit object to analyze
-    
+        habit: The habit to inspect.
+
     Returns:
-        The longest streak count for this habit
+        The longest streak length, or ``0`` if the habit has no
+        completions.
     """
     return habit.get_longest_streak()
 
@@ -90,15 +101,21 @@ def get_struggling_habits(
     habits: List[Habit],
     period_days: int = 30
 ) -> List[Dict[str, Any]]:
-    """
-    Identify habits with which users struggled (low completion rate).
-    
+    """Identify habits with a completion rate below 50% over a window.
+
+    "Expected" completions are estimated from the periodicity and the
+    number of days the habit has existed within the lookback window
+    (capped to the window length). The result is sorted from worst to
+    best so the most-neglected habits surface first.
+
     Args:
-        habits: List of Habit objects
-        period_days: Number of days to look back (default 30)
-    
+        habits: Habits to evaluate.
+        period_days: Lookback window in days (default ``30``).
+
     Returns:
-        List of habits with completion rate below 50%
+        A list of dicts, one per struggling habit, with keys ``id``,
+        ``name``, ``periodicity``, ``completion_rate`` (percentage,
+        rounded to 2 d.p.), ``expected`` and ``actual``.
     """
     cutoff_date = datetime.now() - timedelta(days=period_days)
     
@@ -143,14 +160,18 @@ def get_struggling_habits(
 
 
 def get_analytics_summary(habits: List[Habit]) -> Dict[str, Any]:
-    """
-    Generate a comprehensive analytics summary.
-    
+    """Aggregate top-level metrics for the analytics dashboard.
+
     Args:
-        habits: List of Habit objects
-    
+        habits: Habits to summarise.
+
     Returns:
-        Dictionary containing various analytics metrics
+        A dict with keys ``total_habits``, ``daily_habits``,
+        ``weekly_habits``, ``longest_streak_habit``,
+        ``longest_streak_days``, ``total_completions`` and
+        ``average_streak`` (mean of *current* streaks). When ``habits``
+        is empty, every numeric key is ``0`` and ``longest_streak_habit``
+        is ``None``.
     """
     if not habits:
         return {
@@ -195,15 +216,17 @@ def get_completion_rate_by_habit(
     habits: List[Habit],
     days: int = 30
 ) -> List[Dict[str, Any]]:
-    """
-    Calculate completion rates for all habits over a period.
-    
+    """Compute per-habit completion rates over a lookback window.
+
     Args:
-        habits: List of Habit objects
-        days: Number of days to analyze
-    
+        habits: Habits to evaluate.
+        days: Lookback window in days (default ``30``).
+
     Returns:
-        List of habits with their completion rates
+        A list of dicts (one per habit) with keys ``habit_id``,
+        ``habit_name``, ``completion_rate`` (percentage rounded to 2
+        d.p.), ``completions`` and ``expected``. Order matches the
+        input list.
     """
     cutoff_date = datetime.now() - timedelta(days=days)
     

@@ -1,4 +1,11 @@
-"""FastAPI route definitions."""
+"""FastAPI route definitions for the habit tracker API.
+
+Routes are mounted under the ``/api`` prefix and grouped under the
+``"habits"`` tag for OpenAPI. Each handler keeps its body small —
+validation lives in the Pydantic schemas (:mod:`models.api_models`),
+business logic in :mod:`core.habit_manager`, and pure analytics in
+:mod:`analytics.analytics` — so the routes are essentially adapters.
+"""
 
 from datetime import datetime
 from typing import List, Optional
@@ -27,7 +34,13 @@ async def create_habit(
     habit_data: HabitCreate,
     manager: HabitManager = Depends(get_habit_manager)
 ):
-    """Create a new habit."""
+    """Create a habit.
+
+    Validates the request body against :class:`HabitCreate`, persists
+    a new habit and returns its full :class:`HabitResponse`. Returns
+    HTTP 400 when the manager raises :class:`ValueError` (e.g. an
+    invalid periodicity that slipped past the schema).
+    """
     try:
         habit = manager.create_habit(
             name=habit_data.name,
@@ -55,7 +68,12 @@ async def get_habits(
     periodicity: Optional[str] = Query(None, pattern="^(daily|weekly)$"),
     manager: HabitManager = Depends(get_habit_manager)
 ):
-    """Get all habits, optionally filtered by periodicity."""
+    """List habits.
+
+    When ``periodicity`` is supplied (``daily`` or ``weekly``) the list
+    is filtered server-side; otherwise every habit is returned in the
+    default newest-first order.
+    """
     if periodicity:
         habits = manager.get_habits_by_periodicity(periodicity)
     else:
@@ -84,7 +102,7 @@ async def get_habit(
     habit_id: int,
     manager: HabitManager = Depends(get_habit_manager)
 ):
-    """Get a specific habit by ID."""
+    """Fetch one habit by ID, returning HTTP 404 when not found."""
     habit = manager.get_habit(habit_id)
     
     if not habit:
@@ -109,7 +127,11 @@ async def update_habit(
     habit_data: HabitUpdate,
     manager: HabitManager = Depends(get_habit_manager)
 ):
-    """Update an existing habit."""
+    """Apply a partial update to a habit.
+
+    Any field omitted from the body is left unchanged. Returns 404
+    when the habit does not exist and 400 on validation errors.
+    """
     try:
         habit = manager.update_habit(
             habit_id=habit_id,
@@ -141,7 +163,11 @@ async def delete_habit(
     habit_id: int,
     manager: HabitManager = Depends(get_habit_manager)
 ):
-    """Delete a habit."""
+    """Delete a habit and its completion history.
+
+    Cascading delete on the SQLite layer also removes any related
+    completion rows. Returns 204 on success, 404 if the ID is unknown.
+    """
     success = manager.delete_habit(habit_id)
     
     if not success:
@@ -158,7 +184,13 @@ async def complete_habit(
     completion_data: CompletionCreate,
     manager: HabitManager = Depends(get_habit_manager)
 ):
-    """Mark a habit as completed."""
+    """Record a completion for a habit.
+
+    Returns the updated habit. If the habit has already been completed
+    in the current period, returns HTTP 200 with a payload containing
+    a ``message`` field plus the unchanged habit data so the client
+    can render an idempotency notice.
+    """
     habit = manager.get_habit(habit_id)
     
     if not habit:
@@ -182,7 +214,7 @@ async def complete_habit(
                     longest_streak=habit.get_longest_streak(),
                     completion_count=len(habit.completions),
                     is_broken=habit.is_broken(),
-                ).dict()
+                ).model_dump()
             }
         )
     
@@ -208,7 +240,7 @@ async def complete_habit(
 async def get_analytics_summary(
     manager: HabitManager = Depends(get_habit_manager)
 ):
-    """Get analytics summary for all habits."""
+    """Return aggregate metrics for the analytics dashboard."""
     habits = manager.get_all_habits()
     summary = analytics.get_analytics_summary(habits)
     
@@ -219,7 +251,11 @@ async def get_analytics_summary(
 async def get_longest_streak(
     manager: HabitManager = Depends(get_habit_manager)
 ):
-    """Get the habit with the longest streak."""
+    """Return the single habit with the longest historical streak.
+
+    Returns ``{"habit_name": null, "longest_streak": 0}`` when there
+    are no habits or no completions.
+    """
     habits = manager.get_all_habits()
     habit_name, streak = analytics.get_longest_streak_all(habits)
     
@@ -234,7 +270,11 @@ async def get_struggling_habits(
     days: int = Query(30, ge=1, le=365),
     manager: HabitManager = Depends(get_habit_manager)
 ):
-    """Get habits with low completion rates."""
+    """List habits with a completion rate below 50% over ``days``.
+
+    The ``days`` query parameter is clamped to ``[1, 365]`` by the
+    schema validator.
+    """
     habits = manager.get_all_habits()
     struggling = analytics.get_struggling_habits(habits, days)
     
@@ -249,7 +289,12 @@ async def get_habits_by_periodicity(
     periodicity: str,
     manager: HabitManager = Depends(get_habit_manager)
 ):
-    """Get all habits with a specific periodicity."""
+    """List habits filtered by ``periodicity``.
+
+    Returns HTTP 400 when ``periodicity`` is not ``"daily"`` or
+    ``"weekly"``. The body is intentionally lighter than
+    :func:`get_habits` so the dashboard can render quick lists.
+    """
     if periodicity not in ["daily", "weekly"]:
         raise HTTPException(
             status_code=400,

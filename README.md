@@ -1,186 +1,308 @@
 # Habit Tracker Application
 
 A comprehensive, full-stack habit tracking application built with FastAPI and React.
+The backend exposes a REST API plus a Click CLI; the frontend renders a
+dashboard, calendar view and analytics charts on top of that API.
 
 ## Technical Documentation
 
 - Backend: [backend/TECHNICAL_DOCUMENTATION](backend/TECHNICAL_DOCUMENTATION.md)
 - Frontend: [frontend/TECHNICAL_DOCUMENTATION](frontend/TECHNICAL_DOCUMENTATION.md)
 
-## 🚀 Features
+## Features
 
-*   **Habit Management:** Create, read, update, and delete habits.
-*   **Streak Tracking:** Calculate and visualize current and longest streaks.
-*   **Analytics Dashboard:** View habit completion rates and trends over time using charts.
-*   **Calendar View:** Visualize habit consistency on a calendar interface.
-*   **Responsive UI:** Clean and modern interface built with Tailwind CSS.
+- **Habit Management** — create, read, update and delete daily or weekly habits.
+- **Streak Tracking** — current and longest streaks calculated from completion history.
+- **Analytics Dashboard** — completion rates, struggling habits and longest-streak callouts.
+- **Calendar View** — at-a-glance visualisation of consistency over time.
+- **CLI Companion** — every API capability is mirrored in a Click-based command line.
+- **Idempotent Completions** — repeat completions in the same period are deduplicated.
+- **Concurrency Safe** — the manager layer serialises mutating calls behind a lock.
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 ### Backend
-*   **Framework:** FastAPI (Python 3)
-*   **Database:** SQLite (built-in)
-*   **Validation:** Pydantic
-*   **Testing:** Pytest
+- **Framework:** FastAPI (Python 3.10+)
+- **Database:** SQLite (built-in, accessed via `sqlite3`)
+- **Validation:** Pydantic V2 (`ConfigDict` only — no deprecated nested `Config`)
+- **CLI:** Click + tabulate
+- **Testing:** Pytest + pytest-cov (≥80% line coverage gate, currently ~94%)
 
 ### Frontend
-*   **Framework:** React 18
-*   **Build Tool:** Vite
-*   **Styling:** Tailwind CSS, PostCSS
-*   **Routing:** React Router DOM
-*   **Icons:** Lucide React
-*   **Charts:** Recharts
-*   **HTTP Client:** Axios
+- **Framework:** React 18
+- **Build Tool:** Vite
+- **Styling:** Tailwind CSS, PostCSS
+- **Routing:** React Router DOM
+- **Icons:** Lucide React
+- **Charts:** Recharts
+- **HTTP Client:** Axios
 
-## 📂 Project Structure
+## Architecture
+
+The codebase is organised in clean concentric layers — each layer depends
+only on the layers inside it.
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│  React frontend (Vite)                                                  │
+│  pages / components / hooks / services (axios)                          │
+└──────────────────┬──────────────────────────────────────────────────────┘
+                   │  HTTP (JSON)
+┌──────────────────▼──────────────────────────────────────────────────────┐
+│  api/   FastAPI routes + dependency injection                           │
+│         (validates with Pydantic, never touches SQL)                    │
+└──────────────────┬──────────────────────────────────────────────────────┘
+                   │  function calls
+┌──────────────────▼──────────────────────────────────────────────────────┐
+│  core/  HabitManager — caches habits, serialises writes (RLock)         │
+│  cli/   Click commands reuse the same manager                           │
+└──────────┬───────────────────────────┬───────────────────────────────────┘
+           │                           │
+┌──────────▼─────────┐     ┌───────────▼────────────────────────────────┐
+│  models/habit.py   │     │  storage/  StorageInterface (ABC)          │
+│  Habit + streak    │     │            SQLiteStorage (registers        │
+│  arithmetic        │     │            datetime adapter & converter)   │
+└────────────────────┘     └────────────────────────────────────────────┘
+                                       │
+                                  SQLite file
+```
+
+Key contracts:
+
+- `models/habit.py` — pure domain object, no I/O. Period bucketing,
+  streak counting and "broken" detection live here.
+- `storage/interface.py` — abstract base class. Swap SQLite for any
+  other backend without touching the manager or routes.
+- `core/habit_manager.py` — single point of mutation. Holds a
+  threading.RLock so concurrent FastAPI workers cannot race on
+  completion dedupe or corrupt the in-memory cache.
+- `analytics/analytics.py` — pure functions over `List[Habit]`,
+  written in a deliberately functional style (`map`/`filter`/`reduce`).
+
+## Project Structure
 
 ```text
 habit-tracker-app/
-├── backend/            # FastAPI backend application
-│   ├── analytics/      # Habit data analysis and statistics
-│   ├── api/            # REST API routes and dependencies
-│   ├── cli/            # Command-line interface tools
-│   ├── core/           # Business logic and habit management
-│   ├── fixtures/       # Sample data generation
-│   ├── models/         # Pydantic validation and domain models
-│   ├── storage/        # Database interface and SQLite implementation
-│   ├── tests/          # Pytest test suites
-│   ├── main.py         # Application entry point
-│   └── requirements.txt# Python dependencies
-├── frontend/           # React frontend application
+├── backend/                   # FastAPI backend application
+│   ├── analytics/             # Pure functional habit analytics
+│   ├── api/                   # REST routes + dependency injection
+│   ├── cli/                   # Click-based command-line interface
+│   ├── core/                  # HabitManager (cache + locking)
+│   ├── fixtures/              # Sample data seeder
+│   ├── models/                # Habit domain model + Pydantic schemas
+│   ├── storage/               # Storage abstraction + SQLite implementation
+│   ├── tests/                 # Pytest suite (unit + integration + concurrency)
+│   ├── main.py                # FastAPI entry point
+│   ├── Dockerfile
+│   └── requirements.txt
+├── frontend/                  # React frontend application
 │   ├── src/
-│   │   ├── components/ # Reusable UI components (Cards, Forms, Charts)
-│   │   ├── context/    # React context for state management
-│   │   ├── hooks/      # Custom React hooks (useHabits, useAnalytics)
-│   │   ├── pages/      # Main application views
-│   │   ├── services/   # API client configuration
-│   │   └── utils/      # Helper functions (Dates, Streaks)
-│   ├── package.json    # Node.js dependencies
-│   └── vite.config.js  # Vite configuration
-└── docker-compose.yml  # Docker container configuration
+│   │   ├── components/        # Reusable UI (cards, forms, charts)
+│   │   ├── context/           # React context for state management
+│   │   ├── hooks/             # useHabits, useAnalytics
+│   │   ├── pages/             # Dashboard, Habits, Calendar, Analytics
+│   │   ├── services/          # Axios API client
+│   │   └── utils/             # Date and streak helpers
+│   ├── package.json
+│   └── vite.config.js
+└── docker-compose.yml         # Container orchestration
 ```
 
-## 🏃‍♂️ Getting Started
+## Getting Started
 
 ### Prerequisites
 
-Make sure you have the following installed:
-*   [Docker](https://www.docker.com/) and Docker Compose (Recommended)
-*   **OR**
-*   [Python 3.10+](https://www.python.org/)
-*   [Node.js 18+](https://nodejs.org/) and npm
+Either:
 
-### Method 1: Using Docker (Recommended)
+- [Docker](https://www.docker.com/) and Docker Compose (recommended)
 
-The easiest way to run the application is using Docker Compose.
+or:
 
-1.  Clone the repository and navigate to the project root.
-2.  Start the containers:
-    ```bash
-    docker-compose up --build
-    ```
-3.  Access the application:
-    *   **Frontend:** `http://localhost:3000`
-    *   **Backend API:** `http://localhost:8000`
-    *   **Interactive API Docs (Swagger UI):** `http://localhost:8000/docs`
+- [Python 3.10+](https://www.python.org/)
+- [Node.js 18+](https://nodejs.org/) and npm
 
-*Note: The backend automatically loads sample data on the first start if the database is empty.*
+### Method 1: Docker Compose (recommended)
 
-### Method 2: Manual Setup
+1. Clone the repository and `cd` into the project root.
+2. Start the stack:
+   ```bash
+   docker-compose up --build
+   ```
+3. Open the app:
+   - Frontend: <http://localhost:3000>
+   - Backend API: <http://localhost:8000>
+   - Interactive API docs (Swagger): <http://localhost:8000/docs>
+   - Alternative docs (ReDoc): <http://localhost:8000/redoc>
 
-If you prefer to run the application locally without Docker:
+The backend automatically seeds five sample habits with 28 days of
+synthetic completion data on the first start, so the dashboard is
+populated immediately.
 
-#### 1. Setup Backend
+### Method 2: Manual setup
 
-Navigate to the backend directory:
+#### Backend
+
 ```bash
 cd backend
-```
 
-Create and activate a virtual environment:
-```bash
+# Create and activate a virtual environment
 python -m venv venv
-# On Windows
+# Windows:
 venv\Scripts\activate
-# On macOS/Linux
+# macOS / Linux:
 source venv/bin/activate
-```
 
-Install dependencies:
-```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-Run the backend server:
-```bash
+# Run the API
 python main.py
-# The API will be available at http://localhost:8000
+# → http://localhost:8000
 ```
 
-#### 2. Setup Frontend
+Configuration is read from environment variables (or a local `.env`):
 
-Open a new terminal and navigate to the frontend directory:
+| Variable        | Default                | Description                                         |
+| --------------- | ---------------------- | --------------------------------------------------- |
+| `DATABASE_URL`  | `sqlite:///habits.db`  | SQLite URL. The `sqlite:///` prefix is stripped.    |
+
+#### Frontend
+
+In a second terminal:
+
 ```bash
 cd frontend
-```
 
-Create a `.env` file with the backend API URL:
-```bash
+# Tell Vite where the API lives
 echo "VITE_API_URL=http://localhost:8000" > .env
-```
 
-Install dependencies:
-```bash
+# Install and run
 npm install
-```
-
-Start the Vite development server:
-```bash
 npm run dev
-# The frontend will be available at http://localhost:5173
+# → http://localhost:5173
 ```
 
-## 🧪 Testing
+## Examples
 
-### Backend Tests
-
-Run tests inside Docker (recommended when running via compose):
+### REST API
 
 ```bash
-docker compose exec -T backend pytest -q
+# Create a habit
+curl -X POST http://localhost:8000/api/habits \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Morning Run",
+    "description": "20 minutes outdoors",
+    "periodicity": "daily"
+  }'
+
+# List habits
+curl http://localhost:8000/api/habits
+
+# Mark today complete (id 1)
+curl -X POST http://localhost:8000/api/habits/1/complete \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# Analytics summary
+curl http://localhost:8000/api/analytics/summary
+
+# Habits with <50% completion in the last 14 days
+curl "http://localhost:8000/api/analytics/struggling?days=14"
 ```
 
-Run tests locally from the backend folder:
+### CLI
+
+```bash
+cd backend
+
+# Top-level help
+python -m cli.controller --help
+
+# Create / list / complete / delete
+python -m cli.controller create \
+  --name "Read 30 min" --description "Read a book" --periodicity daily
+python -m cli.controller list
+python -m cli.controller list --periodicity weekly
+python -m cli.controller complete 1
+python -m cli.controller info 1
+python -m cli.controller analyze
+python -m cli.controller longest
+python -m cli.controller delete 1   # interactive confirmation
+```
+
+When running the stack via Docker Compose, prefix the same commands
+with `docker compose exec -T backend`:
+
+```bash
+docker compose exec -T backend python -m cli.controller --help
+docker compose exec -T backend python -m cli.controller list
+printf 'y\n' | docker compose exec -T backend python -m cli.controller delete 1
+```
+
+## Testing
+
+### Backend
+
+Run the suite from the `backend/` directory:
 
 ```bash
 cd backend
 pytest -q
 ```
 
-To run with coverage:
-```bash
-pytest --cov=.
-```
-
-### CLI Functionality Testing
-
-Test CLI commands inside Docker:
+With coverage reporting:
 
 ```bash
-docker compose exec -T backend python -m cli.controller --help
-docker compose exec -T backend python -m cli.controller create --name "CLI Exercise Habit" --description "Habit created for CLI testing" --periodicity daily
-docker compose exec -T backend python -m cli.controller list
-docker compose exec -T backend python -m cli.controller complete 1
-docker compose exec -T backend python -m cli.controller info 1
-docker compose exec -T backend python -m cli.controller analyze
-docker compose exec -T backend python -m cli.controller longest
-printf 'y\n' | docker compose exec -T backend python -m cli.controller delete 1
-docker compose exec -T backend python -m cli.controller list
+pytest --cov=. --cov-report=term-missing
 ```
 
-Run CLI locally from the backend folder:
+The suite contains **98 tests** across:
+
+- `tests/test_habit.py` — domain model and streak arithmetic
+- `tests/test_storage.py` — SQLite round-trips
+- `tests/test_analytics.py` — pure analytics functions
+- `tests/test_api.py` — FastAPI integration tests via `TestClient`
+- `tests/test_cli.py` — Click command surface
+- `tests/test_edge_cases.py` — empty inputs, period boundaries, **multi-threaded completion races**
+
+Line coverage currently sits at **~94%**, comfortably above the 80%
+target. Running with `-W error` (warnings-as-errors) also passes,
+confirming the Pydantic V2 migration and SQLite datetime adapter fix
+are clean.
+
+Run the same suite inside Docker:
 
 ```bash
-cd backend
-python -m cli.controller --help
+docker compose exec -T backend pytest -q
 ```
+
+### Frontend
+
+```bash
+cd frontend
+npm run lint
+```
+
+## Notable Implementation Details
+
+- **Pydantic V2 migration.** All schemas use `ConfigDict`; no
+  `class Config:` blocks remain. `model_dump()` replaces the
+  deprecated `.dict()`.
+- **Explicit SQLite datetime adapter.** Python 3.12 deprecated the
+  default datetime adapter. `storage/sqlite_storage.py` registers
+  ISO-8601 adapter and converter at import time and opens connections
+  with `detect_types=PARSE_DECLTYPES`, so timestamps round-trip without
+  warnings.
+- **Thread-safe completion.** `HabitManager.complete_habit` runs the
+  *check + write* sequence under an `RLock`, so even with N FastAPI
+  workers racing on the same habit only one row is persisted per period.
+- **ISO-week semantics for weekly habits.** Sunday and the following
+  Monday belong to different ISO weeks — the test suite pins this
+  explicitly so refactors can't silently change it.
+
+## License
+
+This project was produced as coursework for the IU "Object-Oriented and
+Functional Programming with Python" module and is provided for
+educational purposes.

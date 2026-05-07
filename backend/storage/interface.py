@@ -1,13 +1,25 @@
-"""Abstract interface for storage implementations."""
+"""Abstract storage contract.
+
+Concrete persistence layers must implement :class:`StorageInterface`.
+The current production backend is :class:`storage.sqlite_storage.SQLiteStorage`
+but the interface is deliberately small so a Postgres or in-memory
+implementation can drop in without touching the manager or API layers.
+"""
 
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import List, Optional
+
 from models.habit import Habit
 
 
 class StorageInterface(ABC):
-    """Abstract base class defining the storage contract."""
+    """Persistence contract used by :class:`HabitManager`.
+
+    Implementations are expected to be safe to share between threads
+    when used through :class:`HabitManager` (which provides its own
+    locking) — they do not need to be lock-free on their own.
+    """
     
     @abstractmethod
     def save_habit(self, habit: Habit) -> int:
