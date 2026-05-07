@@ -184,7 +184,3 @@ Run CLI locally from the backend folder:
 cd backend
 python -m cli.controller --help
 ```
-
-## 📝 License
-
-This project is open-source and available under the MIT License.
